@@ -8,6 +8,7 @@ import libs.OldDoc as OD
 import libs.Shell as SL
 import config as CFG
 import os
+import json
 
 def parse_cellosaurus(cello_txt_db) -> set:
     cl_names = set()
@@ -72,7 +73,7 @@ def get_lines_containing_cells(man_lines, cl_names) -> list:
                 random_pre_phrase_selector = rand.randint(-7, -3)
                 random_post_phrase_selector = rand.randint(3, 7)
                 if f' {cl.lower()} ' in line.lower():
-                    print(f'{cl.lower()}:::{line.lower().find(cl.lower())}')
+                    #print(f'{cl.lower()}:::{line.lower().find(cl.lower())}')
                     first_part, second_part = line.lower().strip().split(cl.lower(), 1)
                     try:
                         first_part_5th_space = index_string(first_part)[random_pre_phrase_selector]
@@ -106,7 +107,7 @@ def select_files_to_process() -> list :
 def tokenize_text(input_text) -> list:
     words = []
     words =  input_text.strip().split(' ')
-    print(words)
+    #print(words)
     return words
 
 def labelize(input_text, cell) -> list:
@@ -143,7 +144,9 @@ def main(argv):
         matched_lines = get_lines_containing_cells(man_lines, cl_names)
         for m_line in matched_lines:
             key_cell, val_line = list(m_line.items())[0]
-            print(f'{val_line}-0-0-0-0-0-0-0{bertify(labelize(val_line, key_cell))}')
+            with open(f'{CFG.working_dir}/train_data.jsonl', 'a', encoding='utf-8') as ft:
+                ft.write(json.dumps(bertify(labelize(val_line, key_cell))))
+                ft.write('\n')
 
 
 
