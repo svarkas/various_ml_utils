@@ -19,10 +19,10 @@ def parse_cellosaurus(cello_txt_db) -> set:
             if line.startswith("ID"):
                 cl_names.add(name.strip())
             # and name ensures that an ID line precedes SY
-            # elif line.startswith("SY") and name:
-            #     synonyms = line.strip().split('   ')[-1].split(";")
-            #     for sy in synonyms:
-            #         cl_names.add(sy.strip())
+            elif line.startswith("SY") and name:
+                synonyms = line.strip().split('   ')[-1].split(";")
+                for sy in synonyms:
+                    cl_names.add(sy.strip())
         return cl_names
 
 def get_text_fromdoc(input_file) -> str:
