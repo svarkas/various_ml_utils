@@ -6,6 +6,8 @@ import unicodedata
 import libs.DocXtoTXT as DXT
 import libs.OldDoc as OD
 import libs.Shell as SL
+import libs.AmazonS3 as AS3
+import libs.UseJournalDB as UDB
 import config as CFG
 import os
 import json
@@ -87,12 +89,21 @@ def get_lines_containing_cells(man_lines, cl_names) -> list:
 
 def get_remote_input_files(input_list):
     sl = SL.Shell()
+    as3 = AS3.AmazonS3()
+    udb = UDB.UseJournalDB()
     with open(input_list,'r') as f:
         for line in f:
             submission_id, full_filename = line.strip().split(':')
             filename = full_filename.strip().split('/')[-1]
             localfile = f'{submission_id}.{filename.strip().split('.')[-1]}'
-            sl.scp_get(f'PATH TO SUBMISSIONS/SUBMISSION_NO_{submission_id}/{filename}', f'{CFG.working_dir}/{localfile}')
+            downloaded_list = os.listdir(CFG.working_dir)
+            if f'{submission_id}.doc' in downloaded_list or f'{submission_id}.docx' in downloaded_list:
+                print(f'{submission_id} is already here')
+            else:
+                if not sl.scp_get(f'{CFG.path_to_subs}/SUBMISSION_NO_{submission_id}/{filename}', f'{CFG.working_dir}/{localfile}'):
+                     print(f'(get_remote_input_files) failed to get {submission_id} from prod, trying the S3 bucket...')
+                     aws_filepath =  udb.get_manuscript(submission_id)
+                     as3.get_file('prodportal', aws_filepath, f"{CFG.working_dir}/{submission_id}.{filename.strip().split('.')[-1]}")
 
 def select_files_to_process() -> list :
     dir_content = os.listdir(CFG.working_dir)
@@ -113,12 +124,18 @@ def labelize(input_text, cell) -> list:
     line_tokens = tokenize_text(input_text)
     cl_tokens = tokenize_text(cell)
     labels = ['O'] * len(line_tokens)
-
+    cell_start = input_text.find(cell)
+    cell_end = cell_start + len(cell)
+    per_token_index = 1
+   #print(f'{cell}:::{cell_start}:::{cell_end}')
     for i in range(0, len(line_tokens)):
-        if cell.lower().find(line_tokens[i].lower()) == 0:
-            labels[i] = 'B-CELL'
-        elif cell.lower().find(line_tokens[i].lower()) > 0:
-            labels[i] = 'I-CELL'
+        #print(per_token_index)
+        if cell_start <= per_token_index <= cell_end:
+            if cell.lower().find(line_tokens[i].lower()) == 0:
+                labels[i] = 'B-CELL'
+            elif cell.lower().find(line_tokens[i].lower()) > 0:
+                labels[i] = 'I-CELL'
+        per_token_index = per_token_index + len(line_tokens[i]) + 1
 
     return list(zip(line_tokens,labels))
 
@@ -135,6 +152,8 @@ def main(argv):
     cl_names = parse_cellosaurus(argv[2])
     #get_remote_input_files(argv[1])
 
+    #print(bertify(labelize("sciences. co the Human Lung adenocarcinoma cell line co nci-h1975 22 was purchased from", "co nci-h1975 22")))
+    #print(bertify(labelize("scies. co the cell line co nci-h1975 22 was purchased from", "co nci-h1975 22")))
     files_to_process = select_files_to_process()
     for file in files_to_process:
         man_text = get_text_fromdoc(f'{CFG.working_dir}/{file}')
