@@ -130,6 +130,12 @@ def labelize(input_text, cell) -> list:
    #print(f'{cell}:::{cell_start}:::{cell_end}')
     for i in range(0, len(line_tokens)):
         #print(per_token_index)
+        '''
+        for multipart cell lines like "0.5 alpha". the 0.5 cell part
+        could be matched alone in another part of the line.
+        to prevent this I calculate the  offset(START) and the offset+cell lenght (END)
+        and I force the match to be within those boundaries
+        '''
         if cell_start <= per_token_index <= cell_end:
             if cell.lower().find(line_tokens[i].lower()) == 0:
                 labels[i] = 'B-CELL'
