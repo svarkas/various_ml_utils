@@ -12,6 +12,10 @@ import config as CFG
 import os
 import json
 
+'''
+returns a list with all unique cell lines to lower case, 
+do we want that or we need all cases ????
+'''
 def parse_cellosaurus(cello_txt_db) -> set:
     cl_names = set()
     with open(cello_txt_db, 'r') as cf:
@@ -19,12 +23,12 @@ def parse_cellosaurus(cello_txt_db) -> set:
         for line in cf:
             name = line.strip().split("   ")[-1]
             if line.startswith("ID"):
-                cl_names.add(name.strip())
+                cl_names.add(name.strip().lower())
             elif line.startswith("SY"):
                 synonyms = line.strip().split('   ')[-1].split(";")
                 for sy in synonyms:
-                    cl_names.add(sy.strip())
-        return cl_names
+                    cl_names.add(sy.strip().lower())
+        return list(set(cl_names))
 
 def get_text_fromdoc(input_file) -> str:
     extension = input_file.split(".")[-1]
@@ -59,6 +63,21 @@ def index_string(input_string) -> list:
             space_idx.append(idx)
     return  space_idx
 
+def filter_cells(cl):
+
+    patterns = ['[a-zA-Z0-9]{1,4}[-_ ./#]{1,2}[a-zA-Z0-9]{2,4}',
+                '[a-zA-Z0-9]{1,4}[-_ ./#]{1,2}[a-zA-Z0-9]{1,4}[-_ ./#]{1,2}[a-zA-Z0-9]{2,4}',
+                '[a-zA-Z0-9]{1,4}[-_ ./#]{1,2}[a-zA-Z0-9]{1,4}[-_ ./#]{1,2}[a-zA-Z0-9]{2,4}[-_ ./#]{1,2}[a-zA-Z0-9]{2,4}',
+                '[a-zA-Z0-9]{1,4}[-_ ./#]{1,2}[a-zA-Z0-9]{1,4}[-_ ./#]{1,2}[a-zA-Z0-9]{2,4}[-_ ./#]{1,2}[a-zA-Z0-9]{2,4}[-_ ./#]{1,2}[a-zA-Z0-9]{2,4}',
+                '[a-zA-Z]{2}[0-9]{2,4}',
+                '[a-zA-Z0-9]{1,4}[-_ ./#]{1,2}[0-9]{1,4}',
+                '[0-9]{1,4}[-_ ./#]{1,2}[a-zA-Z0-9]{1,4}']
+    is_valid = False
+    for pattern in patterns:
+        if re.fullmatch(pattern,cl):
+            is_valid = True
+    return is_valid
+
 def get_lines_containing_cells(man_lines, cl_names) -> list:
     matched_lines = []
     rand =  random.Random()
@@ -70,7 +89,7 @@ def get_lines_containing_cells(man_lines, cl_names) -> list:
         # for cl in cl_names:
         for cl in sorted(cl_names, key=lambda x: len(x), reverse=True ):
             #if cl.lower() not in ['of', 'has', 'cancer', 'all', 'at', 'we', 'may']:
-            if '-' in cl or '_' in cl or ' ' in cl:
+            if filter_cells(cl):
                 random_pre_phrase_selector = rand.randint(-7, -3)
                 random_post_phrase_selector = rand.randint(3, 7)
                 if f' {cl.lower()} ' in line.lower():
@@ -86,6 +105,21 @@ def get_lines_containing_cells(man_lines, cl_names) -> list:
                     except IndexError as e:
                         continue
     return list(matched_lines)
+
+def second_pass(matched_lines, cl_names) -> list:
+    line_cells_pairs = []
+    for mline in matched_lines:
+        line = next(iter(mline.values()))
+        cells_list = []
+        contains_cells = False
+        for cl in sorted(cl_names, key=lambda x: len(x), reverse=True):
+            if filter_cells(cl):
+                if f' {cl.lower()} ' in line.lower() or f' {cl.lower()},' in line.lower():
+                    cells_list.append(cl)
+                    contains_cells = True
+        if contains_cells:
+            line_cells_pairs.append({line:cells_list})
+    return  line_cells_pairs
 
 def get_remote_input_files(input_list):
     sl = SL.Shell()
@@ -120,28 +154,42 @@ def tokenize_text(input_text) -> list:
     #print(words)
     return words
 
-def labelize(input_text, cell) -> list:
+def cell_occurences(input_text, cell) -> list:
+    cell_indexes = []
+    start = 0
+    while True:
+        index = input_text.find(cell, start)
+        if index == -1:
+            break
+        cell_indexes.append(index)
+        start = index + 1
+    return cell_indexes
+
+def labelize(input_text, cells) -> list:
     line_tokens = tokenize_text(input_text)
-    cl_tokens = tokenize_text(cell)
     labels = ['O'] * len(line_tokens)
-    cell_start = input_text.find(cell)
-    cell_end = cell_start + len(cell)
-    per_token_index = 1
-   #print(f'{cell}:::{cell_start}:::{cell_end}')
-    for i in range(0, len(line_tokens)):
-        #print(per_token_index)
-        '''
-        for multipart cell lines like "0.5 alpha". the 0.5 cell part
-        could be matched alone in another part of the line.
-        to prevent this I calculate the  offset(START) and the offset+cell lenght (END)
-        and I force the match to be within those boundaries
-        '''
-        if cell_start <= per_token_index <= cell_end:
-            if cell.lower().find(line_tokens[i].lower()) == 0:
-                labels[i] = 'B-CELL'
-            elif cell.lower().find(line_tokens[i].lower()) > 0:
-                labels[i] = 'I-CELL'
-        per_token_index = per_token_index + len(line_tokens[i]) + 1
+    for cell in cells:
+       #print(f'{cell}:::{cell_start}:::{cell_end}')
+        # locate all the occurences of the cell in line
+        for cell_index in cell_occurences(input_text, cell):
+            per_token_index = 1
+            cell_start = cell_index
+            cell_end = cell_index + len(cell)
+            for i in range(0, len(line_tokens)):
+                #print(per_token_index)
+                '''
+                for multipart cell lines like "0.5 alpha". the 0.5 cell part
+                could be matched alone in another part of the line.
+                to prevent this I calculate the  offset(START) and the offset+cell lenght (END)
+                and I force the match to be within those boundaries, then I search the line's tokens
+                in the cell not the cell in line
+                '''
+                if cell_start <= per_token_index <= cell_end:
+                    if cell.lower().find(line_tokens[i].lower().strip('(),. ')) == 0:
+                        labels[i] = 'B-CELL'
+                    elif cell.lower().find(line_tokens[i].lower()) > 0:
+                        labels[i] = 'I-CELL'
+                per_token_index = per_token_index + len(line_tokens[i]) + 1
 
     return list(zip(line_tokens,labels))
 
@@ -163,13 +211,15 @@ def main(argv):
     files_to_process = select_files_to_process()
     for file in files_to_process:
         man_text = get_text_fromdoc(f'{CFG.working_dir}/{file}')
-        os.rename(f'{CFG.working_dir}/{file}', f'{CFG.working_dir}/processed/{file}')
+        #os.rename(f'{CFG.working_dir}/{file}', f'{CFG.working_dir}/processed/{file}')
         man_lines = man_text.strip().splitlines()
         matched_lines = get_lines_containing_cells(man_lines, cl_names)
-        for m_line in matched_lines:
-            key_cell, val_line = list(m_line.items())[0]
+        matched_lines_with_cells = second_pass(matched_lines,cl_names)
+        for line_cell_dict in matched_lines_with_cells:
+            line = next(iter(line_cell_dict.keys()))
+            cells = next(iter(line_cell_dict.values()))
             with open(f'{CFG.working_dir}/train_data.jsonl', 'a', encoding='utf-8') as ft:
-                ft.write(json.dumps(bertify(labelize(val_line, key_cell))))
+                ft.write(json.dumps(bertify(labelize(line, cells))))
                 ft.write('\n')
 
 
